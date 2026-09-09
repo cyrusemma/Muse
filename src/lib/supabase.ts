@@ -1,46 +1,14 @@
+// This creates one Supabase client that the whole app shares.
+// We import this wherever we need to talk to the database or storage.
+// The env vars come from your .env file.
+
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co'
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder'
 
-let isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
+export const isSupabaseConfigured = Boolean(
+  import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+)
 
-let supabase: any
-
-if (isSupabaseConfigured) {
-	supabase = createClient(supabaseUrl, supabaseAnonKey)
-} else {
-	// Provide a safe no-op stub so app doesn't crash in the browser when env vars are missing.
-	// Methods return a consistent { data, error } shape where appropriate.
-	console.warn('Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env')
-	const makeErr = (msg = 'Supabase not configured') => ({ data: null, error: new Error(msg) })
-
-	supabase = {
-		_configured: false,
-		auth: {
-			signIn: async () => makeErr(),
-			signUp: async () => makeErr(),
-			signOut: async () => makeErr(),
-			onAuthStateChange: (_: any) => ({ data: null, subscription: { unsubscribe: () => {} } }),
-		},
-		from: (_: string) => ({
-			select: async () => makeErr(),
-			insert: async () => makeErr(),
-			update: async () => makeErr(),
-			delete: async () => makeErr(),
-			upsert: async () => makeErr(),
-			order: () => ({ select: async () => makeErr() }),
-		}),
-		storage: {
-			from: (_: string) => ({
-				upload: async () => makeErr(),
-				getPublicUrl: (_: string) => ({ publicURL: '' }),
-				remove: async () => makeErr(),
-				list: async () => makeErr(),
-			}),
-		},
-		rpc: async () => makeErr(),
-	}
-}
-
-export { supabase, isSupabaseConfigured }
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)

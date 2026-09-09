@@ -1,94 +1,330 @@
 import React, { useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
+import { formatDuration } from '../../lib/utils'
 
-export default function UploadModal({ onClose }: { onClose: () => void }) {
+interface UploadModalProps {
+  onClose: () => void
+  onSuccess?: () => void
+}
+
+export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
+  const { user } = useAuth()
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
+  const [album, setAlbum] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const [duration, setDuration] = useState<number>(0)
   const [uploading, setUploading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
-  async function extractDuration(file: File) {
-    return new Promise<number>((resolve) => {
-      const url = URL.createObjectURL(file)
-      const audio = new Audio(url)
-      audio.addEventListener('loadedmetadata', () => {
-        const d = audio.duration || 0
-        URL.revokeObjectURL(url)
-        resolve(d)
-      })
-      // fallback
-      setTimeout(() => {
-        URL.revokeObjectURL(url)
-        resolve(0)
-      }, 3000)
-    })
+  const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setAudioFile(file)
+    if (!title) {
+      // Auto-populate title from filename without extension
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
+      setTitle(cleanName)
+    }
+
+    // Extract duration using temp Audio element
+    try {
+      const tempAudio = new Audio()
+      const objectUrl = URL.createObjectURL(file)
+      tempAudio.src = objectUrl
+      tempAudio.onloadedmetadata = () => {
+        if (tempAudio.duration && !isNaN(tempAudio.duration)) {
+          setDuration(Math.floor(tempAudio.duration))
+        }
+        URL.revokeObjectURL(objectUrl)
+      }
+      tempAudio.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+      }
+    } catch (err) {
+      console.warn('Could not extract duration:', err)
+    }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setCoverFile(file)
+    const previewUrl = URL.createObjectURL(file)
+    setCoverPreview(previewUrl)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!audioFile) {
-      setMessage('Please select an audio file')
+    if (!user) {
+      setError('You must be logged in to upload tracks.')
       return
     }
+    if (!audioFile) {
+      setError('Please select an audio file (MP3, WAV, etc.).')
+      return
+    }
+    if (!title.trim() || !artist.trim()) {
+      setError('Please provide both Title and Artist.')
+      return
+    }
+
+    if (!isSupabaseConfigured) {
+      setError('Supabase is not configured yet. Add your credentials to .env')
+      return
+    }
+
     setUploading(true)
-    setMessage(null)
+    setError(null)
+    setUploadProgress(15)
 
     try {
-      const duration = await extractDuration(audioFile)
+      // 1. Upload Audio to 'audio' bucket
+      const sanitizedAudioName = audioFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const audioPath = `${user.id}/${Date.now()}-${sanitizedAudioName}`
+      
+      setUploadProgress(30)
+      const { error: audioUploadError } = await supabase.storage
+        .from('audio')
+        .upload(audioPath, audioFile, {
+          cacheControl: '3600',
+          upsert: false,
+        })
 
-      // upload audio
-      const audioPath = `tracks/${Date.now()}_${audioFile.name}`
-      const audioUpload = await supabase.storage.from('tracks').upload(audioPath, audioFile)
-      if (audioUpload.error) throw audioUpload.error
-
-      // upload cover if present
-      let coverUrl = ''
-      if (coverFile) {
-        const coverPath = `covers/${Date.now()}_${coverFile.name}`
-        const coverUpload = await supabase.storage.from('covers').upload(coverPath, coverFile)
-        if (coverUpload.error) throw coverUpload.error
-        const { publicURL } = supabase.storage.from('covers').getPublicUrl(coverPath)
-        coverUrl = publicURL
+      if (audioUploadError) {
+        throw new Error(`Audio upload failed: ${audioUploadError.message}`)
       }
 
-      // insert metadata into tracks table
-      const insertRes = await supabase.from('tracks').insert({ title: title || audioFile.name, artist: artist || 'Unknown', audio_path: audioPath, cover_url: coverUrl, duration })
-      if (insertRes.error) throw insertRes.error
+      const { data: audioUrlData } = supabase.storage
+        .from('audio')
+        .getPublicUrl(audioPath)
+      const audioUrl = audioUrlData.publicUrl
 
-      setMessage('Upload successful')
-      setTitle('')
-      setArtist('')
-      setAudioFile(null)
-      setCoverFile(null)
+      setUploadProgress(65)
+
+      // 2. Upload Cover if provided
+      let coverUrl: string | null = null
+      if (coverFile) {
+        const sanitizedCoverName = coverFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+        const coverPath = `${user.id}/${Date.now()}-${sanitizedCoverName}`
+        const { error: coverUploadError } = await supabase.storage
+          .from('covers')
+          .upload(coverPath, coverFile, {
+            cacheControl: '3600',
+            upsert: false,
+          })
+
+        if (!coverUploadError) {
+          const { data: coverUrlData } = supabase.storage
+            .from('covers')
+            .getPublicUrl(coverPath)
+          coverUrl = coverUrlData.publicUrl
+        }
+      }
+
+      setUploadProgress(85)
+
+      // 3. Insert into tracks table
+      const { error: insertError } = await supabase.from('tracks').insert({
+        title: title.trim(),
+        artist: artist.trim(),
+        album: album.trim() || null,
+        audio_url: audioUrl,
+        cover_url: coverUrl,
+        duration_seconds: duration || null,
+        uploaded_by: user.id,
+      })
+
+      if (insertError) {
+        throw new Error(`Failed to save track: ${insertError.message}`)
+      }
+
+      setUploadProgress(100)
+      setTimeout(() => {
+        if (onSuccess) onSuccess()
+        onClose()
+      }, 400)
     } catch (err: any) {
       console.error(err)
-      setMessage(err?.message || 'Upload failed')
-    } finally {
+      setError(err?.message || 'Failed to upload track.')
       setUploading(false)
     }
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)' }}>
-      <div style={{ width: 540, background: 'var(--surface)', padding: 20, borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.6)' }}>
-        <h2 style={{ margin: 0, color: 'var(--text)' }}>Upload Track</h2>
-        <form onSubmit={handleSubmit} style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)' }} />
-          <input placeholder="Artist" value={artist} onChange={(e) => setArtist(e.target.value)} style={{ padding: 10, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)' }} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="w-full max-w-[500px] bg-surface border border-border-col rounded-[12px] p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+        <div className="flex items-center justify-between pb-4 border-b border-border-col">
+          <h2 className="text-[18px] font-semibold text-text-primary">
+            Upload Track
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-primary text-[18px] leading-none"
+          >
+            ✕
+          </button>
+        </div>
 
-          <label style={{ fontSize: 13, color: 'var(--muted)' }}>Audio file</label>
-          <input type="file" accept="audio/*" onChange={(e) => setAudioFile(e.target.files?.[0] || null)} />
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-4">
+          {error && (
+            <div className="p-3 text-[13px] text-red-400 bg-red-950/40 border border-red-800/50 rounded-[6px]">
+              {error}
+            </div>
+          )}
 
-          <label style={{ fontSize: 13, color: 'var(--muted)' }}>Cover (optional)</label>
-          <input type="file" accept="image/*" onChange={(e) => setCoverFile(e.target.files?.[0] || null)} />
+          {/* Audio File Selection */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-medium text-text-muted">
+              Audio File <span className="text-accent">*</span>
+            </label>
+            <div className="relative border border-dashed border-border-col rounded-[8px] p-4 text-center hover:border-accent/60 transition-colors bg-surface2/40 cursor-pointer">
+              <input
+                type="file"
+                accept="audio/*"
+                required
+                onChange={handleAudioChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <div className="flex flex-col items-center gap-1.5">
+                <svg className="w-6 h-6 text-accent" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+                {audioFile ? (
+                  <div>
+                    <p className="text-[13px] font-medium text-text-primary truncate max-w-[320px]">
+                      {audioFile.name}
+                    </p>
+                    {duration > 0 && (
+                      <p className="text-[11px] text-text-dim">
+                        Duration: {formatDuration(duration)}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-[13px] text-text-primary">
+                      Click or drag audio file here
+                    </p>
+                    <p className="text-[11px] text-text-dim">
+                      MP3, WAV, FLAC, AAC up to 50MB
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
 
-          {message && <div style={{ color: '#ffd6d6' }}>{message}</div>}
+          {/* Title & Artist */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-medium text-text-muted">
+                Track Title <span className="text-accent">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. City Boys"
+                className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
+              />
+            </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <button type="button" onClick={onClose} style={{ padding: '8px 12px', borderRadius: 8, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)' }}>Cancel</button>
-            <button type="submit" disabled={uploading} style={{ padding: '8px 14px', borderRadius: 8, background: 'var(--accent)', border: 'none', color: '#fff' }}>{uploading ? 'Uploading...' : 'Upload'}</button>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-medium text-text-muted">
+                Artist Name <span className="text-accent">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={artist}
+                onChange={(e) => setArtist(e.target.value)}
+                placeholder="e.g. Burna Boy"
+                className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Album */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-medium text-text-muted">
+              Album (optional)
+            </label>
+            <input
+              type="text"
+              value={album}
+              onChange={(e) => setAlbum(e.target.value)}
+              placeholder="e.g. I Told Them..."
+              className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
+            />
+          </div>
+
+          {/* Cover Art Upload */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-medium text-text-muted">
+              Cover Artwork (optional)
+            </label>
+            <div className="flex items-center gap-3">
+              {coverPreview ? (
+                <img
+                  src={coverPreview}
+                  alt="Cover preview"
+                  className="w-14 h-14 rounded-[5px] object-cover border border-border-col shrink-0"
+                />
+              ) : (
+                <div className="w-14 h-14 rounded-[5px] bg-surface2 border border-border-col flex items-center justify-center text-text-dim text-[11px] shrink-0">
+                  No Art
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleCoverChange}
+                className="text-[12px] text-text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-[6px] file:border file:border-border-col file:bg-surface2 file:text-text-primary file:text-[12px] file:cursor-pointer hover:file:bg-[#2A2A2A]"
+              />
+            </div>
+          </div>
+
+          {/* Upload Progress Bar */}
+          {uploading && (
+            <div className="w-full flex flex-col gap-1.5 mt-1">
+              <div className="flex justify-between text-[11px] text-text-muted">
+                <span>Uploading...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-surface2 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Footer Actions */}
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border-col mt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={uploading}
+              className="px-4 py-2 rounded-[6px] text-[13px] text-text-muted hover:text-text-primary transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploading || !audioFile}
+              className="px-5 py-2 rounded-[6px] bg-accent text-white text-[13px] font-medium hover:brightness-110 active:scale-98 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow"
+            >
+              {uploading ? 'Uploading...' : 'Publish Track'}
+            </button>
           </div>
         </form>
       </div>

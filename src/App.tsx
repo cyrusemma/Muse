@@ -11,30 +11,33 @@ import Signup from './pages/auth/Signup'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
-  if (loading) return <div style={{ color: '#888', padding: 40 }}>Loading...</div>
+  if (!isSupabaseConfigured) return <>{children}</>
+  if (loading) return <div className="p-10 text-text-muted text-[13px]">Loading...</div>
   if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 export default function App() {
   return (
-    <>
-      {!isSupabaseConfigured && (
-        <div style={{ background: '#fffbf0', color: '#7a4a00', padding: '8px 12px', textAlign: 'center' }}>
-          Supabase is not configured. Fill `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in your .env
-        </div>
-      )}
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
+    <Routes>
+      {/* Auth routes */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
 
-        <Route element={<AppShell />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/playlist/:id" element={<PlaylistPage />} />
-          <Route path="/library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
-        </Route>
-      </Routes>
-    </>
+      {/* Main app shell */}
+      <Route element={<AppShell />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/search" element={<Search />} />
+        <Route path="/playlist/:id" element={<PlaylistPage />} />
+        <Route
+          path="/library"
+          element={
+            <ProtectedRoute>
+              <Library />
+            </ProtectedRoute>
+          }
+        />
+      </Route>
+    </Routes>
   )
 }
