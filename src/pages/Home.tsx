@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { api } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { usePlayerStore } from '../store/playerStore'
 import { formatDuration } from '../lib/utils'
@@ -19,80 +19,60 @@ export default function Home() {
   const [trendingTracks, setTrendingTracks] = useState<Track[]>(DEMO_TRACKS)
   const [recentTracks, setRecentTracks] = useState<Track[]>(DEMO_TRACKS.slice(0, 5))
   const [userPlaylists, setUserPlaylists] = useState<Playlist[]>(DEMO_PLAYLISTS)
-  const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set(['demo-1', 'demo-3']))
+  const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     let isMounted = true
 
     async function loadHomeData() {
-      if (!isSupabaseConfigured) return
-
       try {
         setLoading(true)
-        // 1. Fetch Trending Tracks
-        const { data: trendingData, error } = await supabase
-          .from('tracks')
-          .select('*')
-          .order('play_count', { ascending: false })
-          .limit(10)
-
-        if (!error && trendingData && trendingData.length > 0 && isMounted) {
-          setTrendingTracks(trendingData as Track[])
-          setFeaturedTrack(trendingData[0] as Track)
+        // 1. Fetch Trending Tracks from custom API
+        const tracksRes = await api.tracks.getAll({ sort: 'trending' })
+        if (tracksRes.tracks && tracksRes.tracks.length > 0 && isMounted) {
+          setTrendingTracks(tracksRes.tracks)
+          setFeaturedTrack(tracksRes.tracks[0])
+          setRecentTracks(tracksRes.tracks.slice(0, 5))
         }
 
-        // 2. Fetch User Specific Data
-        if (user) {
-          const { data: likesData } = await supabase
-            .from('liked_tracks')
-            .select('track_id')
-            .eq('user_id', user.id)
-
-          if (likesData && isMounted) {
-            setLikedTrackIds(new Set(likesData.map((l: any) => l.track_id)))
+        // 2. Fetch Playlists
+        try {
+          const playlistRes = await api.playlists.getAll()
+          if (playlistRes.playlists && playlistRes.playlists.length > 0 && isMounted) {
+            setUserPlaylists(playlistRes.playlists)
           }
+        } catch {}
 
-          const { data: historyData } = await supabase
-            .from('play_history')
-            .select('*, track:tracks(*)')
-            .eq('user_id', user.id)
-            .order('played_at', { ascending: false })
-            .limit(10)
+        // 3. Fetch User Specific Likes and History
+        if (user) {
+          try {
+            const likesRes = await api.library.getLiked()
+            if (likesRes.tracks && isMounted) {
+              setLikedTrackIds(new Set(likesRes.tracks.map((t: Track) => t.id)))
+            }
+          } catch {}
 
-          if (historyData && isMounted && historyData.length > 0) {
-            const seen = new Set<string>()
-            const recents: Track[] = []
-            for (const h of historyData) {
-              if (h.track && !seen.has(h.track.id)) {
-                seen.add(h.track.id)
-                recents.push(h.track)
+          try {
+            const historyRes = await api.library.getHistory()
+            if (historyRes.tracks && historyRes.tracks.length > 0 && isMounted) {
+              const seen = new Set<string>()
+              const recents: Track[] = []
+              for (const t of historyRes.tracks) {
+                if (!seen.has(t.id)) {
+                  seen.add(t.id)
+                  recents.push(t)
+                }
+              }
+              if (recents.length > 0) {
+                setRecentTracks(recents)
+                setFeaturedTrack(recents[0])
               }
             }
-            if (recents.length > 0) {
-              setRecentTracks(recents)
-              setFeaturedTrack(recents[0])
-            }
-          }
-
-          const { data: playlistData } = await supabase
-            .from('playlists')
-            .select('*, playlist_tracks(count)')
-            .eq('owner_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(5)
-
-          if (playlistData && playlistData.length > 0 && isMounted) {
-            setUserPlaylists(
-              playlistData.map((pl: any) => ({
-                ...pl,
-                track_count: pl.playlist_tracks?.[0]?.count ?? 0,
-              }))
-            )
-          }
+          } catch {}
         }
       } catch (err) {
-        console.warn('Supabase fetch home data error:', err)
+        console.warn('API fetch home data error, fallback to mock data:', err)
       } finally {
         if (isMounted) setLoading(false)
       }
@@ -205,9 +185,9 @@ export default function Home() {
             </h2>
             <p className="text-[12px] text-text-muted">Top streamed anthems this week</p>
           </div>
-          <span className="text-[12px] text-accent font-medium cursor-pointer hover:underline">
-            View Chart
-          </span>
+          <Link to="/search" className="text-[12px] text-accent font-medium cursor-pointer hover:underline">
+            Explore All
+          </Link>
         </div>
 
         {loading ? (

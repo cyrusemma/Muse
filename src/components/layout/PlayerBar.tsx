@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePlayerStore } from '../../store/playerStore'
 import { formatDuration, truncate } from '../../lib/utils'
 import { useAuth } from '../../context/AuthContext'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import CoverArt from '../ui/CoverArt'
 import { AudioVisualizer } from '../player/AudioVisualizer'
 
@@ -36,27 +36,12 @@ export default function PlayerBar() {
 
   // Check like status when track changes
   useEffect(() => {
-    if (!currentTrack || !user || !isSupabaseConfigured) {
+    if (!currentTrack || !user) {
       setLiked(false)
       return
     }
-    let alive = true
-    supabase
-      .from('liked_tracks')
-      .select('track_id')
-      .eq('user_id', user.id)
-      .eq('track_id', currentTrack.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (alive) setLiked(Boolean(data))
-      })
-      .catch(() => {
-        if (alive) setLiked(false)
-      })
-    return () => {
-      alive = false
-    }
-  }, [currentTrack?.id, user?.id])
+    setLiked(Boolean(currentTrack.is_liked))
+  }, [currentTrack?.id, currentTrack?.is_liked, user?.id])
 
   const handlePlayPause = () => (isPlaying ? pause() : resume())
 
@@ -64,13 +49,11 @@ export default function PlayerBar() {
     if (!currentTrack) return
     const nextVal = !liked
     setLiked(nextVal)
-    if (!user || !isSupabaseConfigured) return
+    if (!user) return
+
     try {
-      if (nextVal) {
-        await supabase.from('liked_tracks').insert({ user_id: user.id, track_id: currentTrack.id })
-      } else {
-        await supabase.from('liked_tracks').delete().eq('user_id', user.id).eq('track_id', currentTrack.id)
-      }
+      const res = await api.tracks.toggleLike(currentTrack.id)
+      setLiked(res.is_liked)
     } catch {
       setLiked(!nextVal)
     }

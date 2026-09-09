@@ -5,7 +5,7 @@
 // piece of state re-render — very efficient.
 
 import { create } from 'zustand'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { api } from '../services/api'
 import type { Track } from '../types'
 
 // Create the audio element once, outside React
@@ -159,20 +159,8 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
       })
 
       playCountTimeout = setTimeout(async () => {
-        if (!isSupabaseConfigured) return
         try {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser()
-          if (user) {
-            await supabase.from('play_history').insert({
-              user_id: user.id,
-              track_id: track.id,
-            })
-          }
-          await supabase.rpc('increment_play_count', {
-            track_id: track.id,
-          })
+          await api.tracks.recordPlay(track.id)
         } catch (e) {
           console.warn('Failed to record play count / history:', e)
         }

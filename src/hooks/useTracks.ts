@@ -1,19 +1,18 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { api } from '../services/api'
 import type { Track } from '../types'
 
-export default function useTracks() {
+export default function useTracks(params?: { search?: string; genre?: string; sort?: string }) {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<any>(null)
 
-  async function fetch() {
+  async function fetchTracks() {
     setLoading(true)
     setError(null)
     try {
-      const res = await supabase.from('tracks').select('*').order('created_at', { ascending: false })
-      if (res.error) throw res.error
-      setTracks(res.data || [])
+      const res = await api.tracks.getAll(params)
+      setTracks(res.tracks || [])
     } catch (err) {
       setError(err)
     } finally {
@@ -21,7 +20,9 @@ export default function useTracks() {
     }
   }
 
-  useEffect(() => { fetch() }, [])
+  useEffect(() => {
+    fetchTracks()
+  }, [params?.search, params?.genre, params?.sort])
 
-  return { tracks, loading, error, refresh: fetch }
+  return { tracks, loading, error, refresh: fetchTracks }
 }

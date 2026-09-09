@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { api } from '../services/api'
 import type { Playlist } from '../types'
 
 export default function usePlaylists() {
@@ -11,9 +11,8 @@ export default function usePlaylists() {
     setLoading(true)
     setError(null)
     try {
-      const res = await supabase.from('playlists').select('*').order('created_at', { ascending: false })
-      if (res.error) throw res.error
-      setPlaylists(res.data || [])
+      const res = await api.playlists.getAll()
+      setPlaylists(res.playlists || [])
     } catch (err) {
       setError(err)
     } finally {
@@ -21,7 +20,9 @@ export default function usePlaylists() {
     }
   }
 
-  useEffect(() => { fetch() }, [])
+  useEffect(() => {
+    fetch()
+  }, [])
 
   return { playlists, loading, error, refresh: fetch }
 }

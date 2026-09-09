@@ -1,39 +1,38 @@
 import { useState, useEffect } from 'react'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { api } from '../services/api'
 import type { Track } from '../types'
 import TrackRow from '../components/ui/TrackRow'
 import { useAuth } from '../context/AuthContext'
 import { DEMO_TRACKS } from '../lib/mockData'
 
 const GENRES = [
-  { id: 'g1', name: 'Afrobeats', colorA: '#7C5CFC', colorB: '#3B8BD4', query: 'Burna' },
-  { id: 'g2', name: 'Amapiano', colorA: '#F2A623', colorB: '#E8583C', query: 'Asake' },
-  { id: 'g3', name: 'R&B / Soul', colorA: '#E8583C', colorB: '#7a1a0a', query: 'Tems' },
-  { id: 'g4', name: 'Pop & Vibes', colorA: '#D4537E', colorB: '#4a0a28', query: 'Water' },
-  { id: 'g5', name: 'Afrorave', colorA: '#1D9E75', colorB: '#04342C', query: 'Rema' },
-  { id: 'g6', name: 'Highlife', colorA: '#3B8BD4', colorB: '#042C53', query: 'Essence' },
-  { id: 'g7', name: 'Dancehall', colorA: '#1D9E75', colorB: '#F2A623', query: 'Ayra' },
-  { id: 'g8', name: 'Party Mix', colorA: '#7C5CFC', colorB: '#D4537E', query: 'Davido' },
+  { id: 'g1', name: 'Synthwave', colorA: '#7C5CFC', colorB: '#3B8BD4', query: 'Synthwave' },
+  { id: 'g2', name: 'Electronic', colorA: '#F2A623', colorB: '#E8583C', query: 'Electronic' },
+  { id: 'g3', name: 'Ambient', colorA: '#E8583C', colorB: '#7a1a0a', query: 'Ambient' },
+  { id: 'g4', name: 'Cyberpunk', colorA: '#D4537E', colorB: '#4a0a28', query: 'Cyberpunk' },
+  { id: 'g5', name: 'Afrobeats', colorA: '#1D9E75', colorB: '#04342C', query: 'Afrobeats' },
+  { id: 'g6', name: 'R&B / Soul', colorA: '#3B8BD4', colorB: '#042C53', query: 'Soul' },
+  { id: 'g7', name: 'Pop & Vibes', colorA: '#1D9E75', colorB: '#F2A623', query: 'Pop' },
+  { id: 'g8', name: 'Chillout', colorA: '#7C5CFC', colorB: '#D4537E', query: 'Chill' },
 ]
 
 export default function Search() {
   const { user } = useAuth()
   const [searchTerm, setSearchTerm] = useState('')
   const [results, setResults] = useState<Track[]>([])
-  const [likedIds, setLikedIds] = useState<Set<string>>(new Set(['demo-1']))
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
 
   // Fetch liked tracks for user
   useEffect(() => {
-    if (!user || !isSupabaseConfigured) return
-    supabase
-      .from('liked_tracks')
-      .select('track_id')
-      .eq('user_id', user.id)
-      .then(({ data }) => {
-        if (data) setLikedIds(new Set(data.map((d: any) => d.track_id)))
+    if (!user) return
+    api.library
+      .getLiked()
+      .then((data) => {
+        if (data.tracks) setLikedIds(new Set(data.tracks.map((d: any) => d.id)))
       })
+      .catch(() => {})
   }, [user?.id])
 
   // 300ms Debounced search effect
@@ -50,32 +49,12 @@ export default function Search() {
     setHasSearched(true)
 
     const timer = setTimeout(async () => {
-      if (!isSupabaseConfigured) {
-        // Filter demo tracks locally
-        const matches = DEMO_TRACKS.filter(
-          (t) =>
-            t.title.toLowerCase().includes(trimmed) ||
-            t.artist.toLowerCase().includes(trimmed) ||
-            (t.album && t.album.toLowerCase().includes(trimmed))
-        )
-        setResults(matches)
-        setLoading(false)
-        return
-      }
-
       try {
-        const { data, error } = await supabase
-          .from('tracks')
-          .select('*')
-          .or(
-            `title.ilike.%${trimmed}%,artist.ilike.%${trimmed}%,album.ilike.%${trimmed}%`
-          )
-          .limit(20)
-
-        if (!error && data && data.length > 0) {
-          setResults(data)
+        const data = await api.tracks.getAll({ search: trimmed })
+        if (data && data.tracks && data.tracks.length > 0) {
+          setResults(data.tracks)
         } else {
-          // Fallback to local search if remote returned empty
+          // Fallback to local filter if remote empty
           const matches = DEMO_TRACKS.filter(
             (t) =>
               t.title.toLowerCase().includes(trimmed) ||
@@ -85,8 +64,14 @@ export default function Search() {
           setResults(matches)
         }
       } catch (err) {
-        console.warn('Search failed:', err)
-        setResults([])
+        console.warn('Search API failed, fallback to mock filter:', err)
+        const matches = DEMO_TRACKS.filter(
+          (t) =>
+            t.title.toLowerCase().includes(trimmed) ||
+            t.artist.toLowerCase().includes(trimmed) ||
+            (t.album && t.album.toLowerCase().includes(trimmed))
+        )
+        setResults(matches)
       } finally {
         setLoading(false)
       }

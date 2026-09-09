@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { api } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { usePlayerStore } from '../store/playerStore'
 import { formatDuration, trackColor, trackColorDark } from '../lib/utils'
@@ -16,9 +16,9 @@ export default function PlaylistPage() {
   // Find demo playlist if matching
   const initialDemoPlaylist = DEMO_PLAYLISTS.find((p) => p.id === id) || DEMO_PLAYLISTS[0]
   const [playlist, setPlaylist] = useState<Playlist | null>(initialDemoPlaylist)
-  const [ownerUsername, setOwnerUsername] = useState<string>('Muse')
+  const [ownerUsername, setOwnerUsername] = useState<string>('Muse Curator')
   const [tracks, setTracks] = useState<Track[]>(DEMO_TRACKS.slice(0, 6))
-  const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set(['demo-1', 'demo-3']))
+  const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
 
   // Track addition state for owner
@@ -27,60 +27,27 @@ export default function PlaylistPage() {
   const [searchQuery, setSearchQuery] = useState('')
 
   const fetchPlaylistData = async () => {
-    if (!id || !isSupabaseConfigured) return
+    if (!id) return
 
     setLoading(true)
     try {
-      // 1. Fetch Playlist Details
-      const { data: plData, error: plError } = await supabase
-        .from('playlists')
-        .select('*')
-        .eq('id', id)
-        .single()
-
-      if (!plError && plData) {
-        setPlaylist(plData)
-
-        // 2. Fetch Owner Profile
-        if (plData.owner_id) {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('username, display_name')
-            .eq('id', plData.owner_id)
-            .single()
-          if (profileData) {
-            setOwnerUsername(profileData.display_name || profileData.username)
-          }
-        }
-
-        // 3. Fetch Playlist Tracks
-        const { data: ptData, error: ptError } = await supabase
-          .from('playlist_tracks')
-          .select('*, track:tracks(*)')
-          .eq('playlist_id', id)
-          .order('position')
-
-        if (!ptError && ptData && ptData.length > 0) {
-          const trackList = ptData
-            .map((p: any) => p.track)
-            .filter(Boolean) as Track[]
-          setTracks(trackList)
-        }
+      const data = await api.playlists.getById(id)
+      if (data && data.playlist) {
+        setPlaylist(data.playlist)
+        setTracks(data.playlist.tracks || [])
+        setOwnerUsername(data.playlist.owner_display_name || data.playlist.owner_username || 'Muse Curator')
       }
 
-      // 4. Fetch User Likes
       if (user) {
-        const { data: likesData } = await supabase
-          .from('liked_tracks')
-          .select('track_id')
-          .eq('user_id', user.id)
-
-        if (likesData) {
-          setLikedTrackIds(new Set(likesData.map((l: any) => l.track_id)))
-        }
+        try {
+          const likesRes = await api.library.getLiked()
+          if (likesRes.tracks) {
+            setLikedTrackIds(new Set(likesRes.tracks.map((t: Track) => t.id)))
+          }
+        } catch {}
       }
     } catch (err) {
-      console.warn('Error loading playlist from Supabase:', err)
+      console.warn('Error loading playlist from API, using fallback:', err)
     } finally {
       setLoading(false)
     }
@@ -97,45 +64,33 @@ export default function PlaylistPage() {
 
   const handleOpenAddTracks = async () => {
     setShowAddTracks(true)
-    if (!isSupabaseConfigured) {
-      setAvailableTracks(DEMO_TRACKS)
-      return
-    }
     try {
-      const { data } = await supabase
-        .from('tracks')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(30)
-      if (data && data.length > 0) {
-        setAvailableTracks(data)
+      const res = await api.tracks.getAll()
+      if (res.tracks && res.tracks.length > 0) {
+        setAvailableTracks(res.tracks)
       } else {
         setAvailableTracks(DEMO_TRACKS)
       }
     } catch (e) {
       console.warn('Error fetching available tracks:', e)
+      setAvailableTracks(DEMO_TRACKS)
     }
   }
 
   const handleAddTrackToPlaylist = async (track: Track) => {
     if (!id) return
-    const nextPosition = tracks.length
     setTracks([...tracks, track])
 
-    if (user && isSupabaseConfigured) {
+    if (user) {
       try {
-        await supabase.from('playlist_tracks').insert({
-          playlist_id: id,
-          track_id: track.id,
-          position: nextPosition,
-        })
+        await api.playlists.addTrack(id, track.id)
       } catch (err) {
-        console.warn('Error adding track to playlist in DB:', err)
+        console.warn('Error adding track to playlist in API:', err)
       }
     }
   }
 
-  const isOwner = (user && playlist && user.id === playlist.owner_id) || !isSupabaseConfigured
+  const isOwner = user && playlist && user.id === playlist.owner_id
   const totalDuration = tracks.reduce(
     (sum, t) => sum + (t.duration_seconds || 0),
     0
@@ -219,7 +174,7 @@ export default function PlaylistPage() {
           )}
           <div className="flex items-center justify-center sm:justify-start gap-2 text-[13px] text-text-muted mt-1">
             <span className="text-text-primary font-medium">
-              {ownerUsername || 'Muse Curator'}
+              {ownerUsername}
             </span>
             <span>•</span>
             <span>{tracks.length} {tracks.length === 1 ? 'song' : 'songs'}</span>

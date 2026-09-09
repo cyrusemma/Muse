@@ -2,14 +2,13 @@ import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Playlist, Track } from '../../types'
 import { usePlayerStore } from '../../store/playerStore'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import { DEMO_TRACKS } from '../../lib/mockData'
 
 interface PlaylistCardProps {
   playlist: Playlist
 }
 
-// Color palettes for gradient fallback
 const PALETTE_A = ['#7C5CFC', '#1D9E75', '#E8583C', '#3B8BD4', '#D4537E', '#F2A623']
 const PALETTE_B = ['#3B1FA8', '#04342C', '#7a1a0a', '#042C53', '#4a0a28', '#7a4a00']
 
@@ -28,19 +27,15 @@ export default function PlaylistCard({ playlist }: PlaylistCardProps) {
   const handleQuickPlay = async (e: React.MouseEvent) => {
     e.stopPropagation()
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data: pts } = await supabase
-          .from('playlist_tracks')
-          .select('*, track:tracks(*)')
-          .eq('playlist_id', playlist.id)
-          .order('position')
-
-        const tracks: Track[] = (pts || []).map((p: any) => p.track).filter(Boolean)
-        if (tracks.length > 0) { play(tracks[0], tracks); return }
-      } catch (err) {
-        console.warn('Quick play error:', err)
+    try {
+      const res = await api.playlists.getById(playlist.id)
+      const tracks: Track[] = res.playlist?.tracks || []
+      if (tracks.length > 0) {
+        play(tracks[0], tracks)
+        return
       }
+    } catch (err) {
+      console.warn('Quick play error:', err)
     }
 
     // Fallback to demo tracks

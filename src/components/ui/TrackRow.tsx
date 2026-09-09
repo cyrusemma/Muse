@@ -3,7 +3,7 @@ import type { Track } from '../../types'
 import { usePlayerStore } from '../../store/playerStore'
 import { formatDuration } from '../../lib/utils'
 import { useAuth } from '../../context/AuthContext'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import CoverArt from './CoverArt'
 
 interface TrackRowProps {
@@ -25,7 +25,7 @@ export default function TrackRow({
 }: TrackRowProps) {
   const { currentTrack, isPlaying, play, pause, resume } = usePlayerStore()
   const { user } = useAuth()
-  const [liked, setLiked] = useState(initialLiked)
+  const [liked, setLiked] = useState(initialLiked || Boolean(track.is_liked))
   const [isHovered, setIsHovered] = useState(false)
 
   const isCurrent = currentTrack?.id === track.id
@@ -46,14 +46,11 @@ export default function TrackRow({
     setLiked(nextLiked)
     if (onLikeToggle) onLikeToggle(track.id)
 
-    if (!user || !isSupabaseConfigured) return
+    if (!user) return
 
     try {
-      if (nextLiked) {
-        await supabase.from('liked_tracks').insert({ user_id: user.id, track_id: track.id })
-      } else {
-        await supabase.from('liked_tracks').delete().eq('user_id', user.id).eq('track_id', track.id)
-      }
+      const res = await api.tracks.toggleLike(track.id)
+      setLiked(res.is_liked)
     } catch (err) {
       console.warn('Like toggle failed:', err)
       setLiked(!nextLiked)

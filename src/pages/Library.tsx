@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { api } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type { Playlist, Track } from '../types'
 import { DEMO_TRACKS, DEMO_PLAYLISTS } from '../lib/mockData'
@@ -23,49 +23,30 @@ export default function Library() {
   const [showUploadModal, setShowUploadModal] = useState(false)
 
   const fetchLibraryData = async () => {
-    if (!user || !isSupabaseConfigured) return
-
     setLoading(true)
     try {
       // 1. Fetch User Playlists
-      const { data: plData } = await supabase
-        .from('playlists')
-        .select('*, playlist_tracks(count)')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-
-      if (plData && plData.length > 0) {
-        setPlaylists(
-          plData.map((p: any) => ({
-            ...p,
-            track_count: p.playlist_tracks?.[0]?.count ?? 0,
-          }))
-        )
+      const plData = await api.playlists.getAll()
+      if (plData.playlists) {
+        setPlaylists(plData.playlists)
       }
 
-      // 2. Fetch Liked Songs
-      const { data: likedData } = await supabase
-        .from('liked_tracks')
-        .select('*, track:tracks(*)')
-        .eq('user_id', user.id)
-        .order('liked_at', { ascending: false })
+      if (user) {
+        // 2. Fetch Liked Songs
+        try {
+          const likedData = await api.library.getLiked()
+          if (likedData.tracks) {
+            setLikedTracks(likedData.tracks)
+          }
+        } catch {}
 
-      if (likedData && likedData.length > 0) {
-        const tracks = likedData
-          .map((r: any) => r.track)
-          .filter(Boolean) as Track[]
-        setLikedTracks(tracks)
-      }
-
-      // 3. Fetch Uploads
-      const { data: uploadsData } = await supabase
-        .from('tracks')
-        .select('*')
-        .eq('uploaded_by', user.id)
-        .order('created_at', { ascending: false })
-
-      if (uploadsData && uploadsData.length > 0) {
-        setUploadedTracks(uploadsData as Track[])
+        // 3. Fetch Uploads
+        try {
+          const uploadsData = await api.library.getUploads()
+          if (uploadsData.tracks) {
+            setUploadedTracks(uploadsData.tracks)
+          }
+        } catch {}
       }
     } catch (err) {
       console.warn('Error fetching library data:', err)

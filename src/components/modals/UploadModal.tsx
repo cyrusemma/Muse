@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { formatDuration } from '../../lib/utils'
 
@@ -13,12 +13,13 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
   const [album, setAlbum] = useState('')
+  const [genre, setGenre] = useState('Electronic')
+  const [lyrics, setLyrics] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [coverFile, setCoverFile] = useState<File | null>(null)
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [duration, setDuration] = useState<number>(0)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -27,12 +28,10 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
 
     setAudioFile(file)
     if (!title) {
-      // Auto-populate title from filename without extension
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
       setTitle(cleanName)
     }
 
-    // Extract duration using temp Audio element
     try {
       const tempAudio = new Audio()
       const objectUrl = URL.createObjectURL(file)
@@ -75,91 +74,37 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
       return
     }
 
-    if (!isSupabaseConfigured) {
-      setError('Supabase is not configured yet. Add your credentials to .env')
-      return
-    }
-
     setUploading(true)
     setError(null)
-    setUploadProgress(15)
 
     try {
-      // 1. Upload Audio to 'audio' bucket
-      const sanitizedAudioName = audioFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const audioPath = `${user.id}/${Date.now()}-${sanitizedAudioName}`
-      
-      setUploadProgress(30)
-      const { error: audioUploadError } = await supabase.storage
-        .from('audio')
-        .upload(audioPath, audioFile, {
-          cacheControl: '3600',
-          upsert: false,
-        })
-
-      if (audioUploadError) {
-        throw new Error(`Audio upload failed: ${audioUploadError.message}`)
-      }
-
-      const { data: audioUrlData } = supabase.storage
-        .from('audio')
-        .getPublicUrl(audioPath)
-      const audioUrl = audioUrlData.publicUrl
-
-      setUploadProgress(65)
-
-      // 2. Upload Cover if provided
-      let coverUrl: string | null = null
+      const formData = new FormData()
+      formData.append('audio', audioFile)
       if (coverFile) {
-        const sanitizedCoverName = coverFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-        const coverPath = `${user.id}/${Date.now()}-${sanitizedCoverName}`
-        const { error: coverUploadError } = await supabase.storage
-          .from('covers')
-          .upload(coverPath, coverFile, {
-            cacheControl: '3600',
-            upsert: false,
-          })
-
-        if (!coverUploadError) {
-          const { data: coverUrlData } = supabase.storage
-            .from('covers')
-            .getPublicUrl(coverPath)
-          coverUrl = coverUrlData.publicUrl
-        }
+        formData.append('cover', coverFile)
       }
+      formData.append('title', title.trim())
+      formData.append('artist', artist.trim())
+      if (album.trim()) formData.append('album', album.trim())
+      if (genre.trim()) formData.append('genre', genre.trim())
+      if (duration) formData.append('duration_seconds', String(duration))
+      if (lyrics.trim()) formData.append('lyrics', lyrics.trim())
 
-      setUploadProgress(85)
+      await api.tracks.upload(formData)
 
-      // 3. Insert into tracks table
-      const { error: insertError } = await supabase.from('tracks').insert({
-        title: title.trim(),
-        artist: artist.trim(),
-        album: album.trim() || null,
-        audio_url: audioUrl,
-        cover_url: coverUrl,
-        duration_seconds: duration || null,
-        uploaded_by: user.id,
-      })
-
-      if (insertError) {
-        throw new Error(`Failed to save track: ${insertError.message}`)
-      }
-
-      setUploadProgress(100)
-      setTimeout(() => {
-        if (onSuccess) onSuccess()
-        onClose()
-      }, 400)
+      if (onSuccess) onSuccess()
+      onClose()
     } catch (err: any) {
-      console.error(err)
+      console.error('Upload track error:', err)
       setError(err?.message || 'Failed to upload track.')
+    } finally {
       setUploading(false)
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-[500px] bg-surface border border-border-col rounded-[12px] p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+      <div className="w-full max-w-[520px] bg-surface border border-border-col rounded-[12px] p-6 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-border-col">
           <h2 className="text-[18px] font-semibold text-text-primary">
             Upload Track
@@ -213,7 +158,7 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
                       Click or drag audio file here
                     </p>
                     <p className="text-[11px] text-text-dim">
-                      MP3, WAV, FLAC, AAC up to 50MB
+                      MP3, WAV, FLAC, AAC up to 100MB
                     </p>
                   </div>
                 )}
@@ -232,7 +177,7 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. City Boys"
+                placeholder="e.g. Neon Horizon"
                 className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
               />
             </div>
@@ -246,23 +191,60 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
                 required
                 value={artist}
                 onChange={(e) => setArtist(e.target.value)}
-                placeholder="e.g. Burna Boy"
+                placeholder="e.g. Aetheria"
                 className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Album */}
+          {/* Album & Genre */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-medium text-text-muted">
+                Album (optional)
+              </label>
+              <input
+                type="text"
+                value={album}
+                onChange={(e) => setAlbum(e.target.value)}
+                placeholder="e.g. Neon Dreams"
+                className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-medium text-text-muted">
+                Genre
+              </label>
+              <select
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary focus:outline-none"
+              >
+                <option value="Electronic">Electronic</option>
+                <option value="Synthwave">Synthwave</option>
+                <option value="Ambient">Ambient</option>
+                <option value="Cyberpunk">Cyberpunk</option>
+                <option value="Afrobeats">Afrobeats</option>
+                <option value="Hip-Hop">Hip-Hop</option>
+                <option value="R&B">R&B</option>
+                <option value="Pop">Pop</option>
+                <option value="Rock">Rock</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Lyrics (LRC synced or plain) */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-medium text-text-muted">
-              Album (optional)
+              Lyrics (optional, LRC format supported e.g. [00:15.00] Line text)
             </label>
-            <input
-              type="text"
-              value={album}
-              onChange={(e) => setAlbum(e.target.value)}
-              placeholder="e.g. I Told Them..."
-              className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
+            <textarea
+              value={lyrics}
+              onChange={(e) => setLyrics(e.target.value)}
+              placeholder="[00:00.00] Intro...&#10;[00:15.00] First verse lyrics..."
+              rows={3}
+              className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none font-mono text-xs"
             />
           </div>
 
@@ -292,22 +274,6 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
             </div>
           </div>
 
-          {/* Upload Progress Bar */}
-          {uploading && (
-            <div className="w-full flex flex-col gap-1.5 mt-1">
-              <div className="flex justify-between text-[11px] text-text-muted">
-                <span>Uploading...</span>
-                <span>{uploadProgress}%</span>
-              </div>
-              <div className="w-full h-1.5 bg-surface2 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
           {/* Footer Actions */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-border-col mt-2">
             <button
@@ -323,7 +289,7 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
               disabled={uploading || !audioFile}
               className="px-5 py-2 rounded-[6px] bg-accent text-white text-[13px] font-medium hover:brightness-110 active:scale-98 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow"
             >
-              {uploading ? 'Uploading...' : 'Publish Track'}
+              {uploading ? 'Uploading to Server...' : 'Publish Track'}
             </button>
           </div>
         </form>

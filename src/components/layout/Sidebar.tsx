@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import type { Playlist } from '../../types'
 import { trackColor, trackColorDark } from '../../lib/utils'
 import { DEMO_PLAYLISTS } from '../../lib/mockData'
@@ -9,11 +9,10 @@ import UploadModal from '../modals/UploadModal'
 import CreatePlaylistModal from '../modals/CreatePlaylistModal'
 
 const HARDCODED_ARTISTS = [
-  { name: 'Burna Boy', genre: 'Afrobeats', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' },
-  { name: 'Tems', genre: 'R&B / Soul', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80' },
-  { name: 'Asake', genre: 'Amapiano', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80' },
-  { name: 'Wizkid', genre: 'Afrobeats', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80' },
-  { name: 'Rema', genre: 'Afrorave', avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&auto=format&fit=crop&q=80' },
+  { name: 'Aetheria', genre: 'Synthwave', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' },
+  { name: 'Pulse Velocity', genre: 'Electronic', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80' },
+  { name: 'Lunar Drift', genre: 'Ambient', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80' },
+  { name: 'Cyber Pulse', genre: 'Cyberpunk', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80' },
 ]
 
 export default function Sidebar() {
@@ -24,21 +23,10 @@ export default function Sidebar() {
   const [showCreate, setShowCreate] = useState(false)
 
   const fetchUserPlaylists = async () => {
-    if (!user || !isSupabaseConfigured) return
-
     try {
-      const { data, error } = await supabase
-        .from('playlists')
-        .select('*, playlist_tracks(count)')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-
-      if (!error && data && data.length > 0) {
-        const formatted: Playlist[] = data.map((pl: any) => ({
-          ...pl,
-          track_count: pl.playlist_tracks?.[0]?.count ?? 0,
-        }))
-        setPlaylists(formatted)
+      const res = await api.playlists.getAll()
+      if (res.playlists && res.playlists.length > 0) {
+        setPlaylists(res.playlists)
       }
     } catch (err) {
       console.warn('Sidebar fetch playlists error:', err)
@@ -126,7 +114,7 @@ export default function Sidebar() {
           <div className="flex gap-2 px-1">
             <button
               onClick={() => {
-                if (!user && isSupabaseConfigured) navigate('/login')
+                if (!user) navigate('/login')
                 else setShowUpload(true)
               }}
               className="flex-1 py-1.5 px-2.5 rounded-[6px] bg-accent text-white text-[12px] font-semibold hover:brightness-110 active:scale-98 transition flex items-center justify-center gap-1.5 shadow-md shadow-accent/25"
@@ -138,7 +126,7 @@ export default function Sidebar() {
             </button>
             <button
               onClick={() => {
-                if (!user && isSupabaseConfigured) navigate('/login')
+                if (!user) navigate('/login')
                 else setShowCreate(true)
               }}
               className="py-1.5 px-2.5 rounded-[6px] bg-surface2 border border-border-col text-text-primary text-[12px] font-medium hover:bg-[#2A2A2A] active:scale-98 transition flex items-center justify-center"

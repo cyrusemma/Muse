@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { supabase, isSupabaseConfigured } from '../../lib/supabase'
+import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 
 interface CreatePlaylistModalProps {
@@ -15,8 +15,17 @@ export default function CreatePlaylistModal({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isPublic, setIsPublic] = useState(true)
+  const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCoverFile(file)
+    setCoverPreview(URL.createObjectURL(file))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,28 +38,24 @@ export default function CreatePlaylistModal({
       return
     }
 
-    if (!isSupabaseConfigured) {
-      setError('Supabase is not configured yet. Add your credentials to .env')
-      return
-    }
-
     setLoading(true)
     setError(null)
 
     try {
-      const { error: insertError } = await supabase.from('playlists').insert({
-        name: name.trim(),
-        description: description.trim() || null,
-        owner_id: user.id,
-        is_public: isPublic,
-      })
+      const formData = new FormData()
+      formData.append('name', name.trim())
+      if (description.trim()) formData.append('description', description.trim())
+      formData.append('is_public', String(isPublic))
+      if (coverFile) {
+        formData.append('cover', coverFile)
+      }
 
-      if (insertError) throw insertError
+      await api.playlists.create(formData)
 
       if (onSuccess) onSuccess()
       onClose()
     } catch (err: any) {
-      console.error(err)
+      console.error('Create playlist error:', err)
       setError(err?.message || 'Failed to create playlist.')
     } finally {
       setLoading(false)
@@ -59,7 +64,7 @@ export default function CreatePlaylistModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-[440px] bg-surface border border-border-col rounded-[12px] p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+      <div className="w-full max-w-[460px] bg-surface border border-border-col rounded-[12px] p-6 shadow-2xl animate-fade-in">
         <div className="flex items-center justify-between pb-4 border-b border-border-col">
           <h2 className="text-[18px] font-semibold text-text-primary">
             New Playlist
@@ -89,7 +94,7 @@ export default function CreatePlaylistModal({
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Afrobeats Chill"
+              placeholder="e.g. Midnight Chill"
               className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none"
             />
           </div>
@@ -105,6 +110,32 @@ export default function CreatePlaylistModal({
               placeholder="Give your playlist a vibe description..."
               className="w-full px-3 py-2 bg-surface2 border border-border-col rounded-[6px] text-[13px] text-text-primary placeholder:text-text-dim focus:outline-none resize-none"
             />
+          </div>
+
+          {/* Cover Art Upload */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-medium text-text-muted">
+              Cover Artwork (optional)
+            </label>
+            <div className="flex items-center gap-3">
+              {coverPreview ? (
+                <img
+                  src={coverPreview}
+                  alt="Cover preview"
+                  className="w-12 h-12 rounded-[5px] object-cover border border-border-col shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-[5px] bg-surface2 border border-border-col flex items-center justify-center text-text-dim text-[11px] shrink-0">
+                  No Art
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleCoverChange}
+                className="text-[12px] text-text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-[6px] file:border file:border-border-col file:bg-surface2 file:text-text-primary file:text-[12px] file:cursor-pointer hover:file:bg-[#2A2A2A]"
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2.5 pt-1">
