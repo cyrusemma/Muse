@@ -16,7 +16,7 @@ export default function PlaylistPage() {
   // Find demo playlist if matching
   const initialDemoPlaylist = DEMO_PLAYLISTS.find((p) => p.id === id) || DEMO_PLAYLISTS[0]
   const [playlist, setPlaylist] = useState<Playlist | null>(initialDemoPlaylist)
-  const [ownerUsername, setOwnerUsername] = useState<string>('wavr')
+  const [ownerUsername, setOwnerUsername] = useState<string>('Muse')
   const [tracks, setTracks] = useState<Track[]>(DEMO_TRACKS.slice(0, 6))
   const [likedTrackIds, setLikedTrackIds] = useState<Set<string>>(new Set(['demo-1', 'demo-3']))
   const [loading, setLoading] = useState(false)
@@ -219,7 +219,7 @@ export default function PlaylistPage() {
           )}
           <div className="flex items-center justify-center sm:justify-start gap-2 text-[13px] text-text-muted mt-1">
             <span className="text-text-primary font-medium">
-              {ownerUsername || 'Wavr Curator'}
+              {ownerUsername || 'Muse Curator'}
             </span>
             <span>•</span>
             <span>{tracks.length} {tracks.length === 1 ? 'song' : 'songs'}</span>

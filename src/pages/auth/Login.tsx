@@ -46,7 +46,7 @@ export default function Login() {
           {/* Logo */}
           <div className="flex items-center justify-center gap-2 mb-8">
             <span className="w-3 h-3 rounded-full bg-accent shadow-lg shadow-accent/40" />
-            <span className="text-[26px] font-bold tracking-tight text-white">wavr</span>
+            <span className="text-[26px] font-bold tracking-tight text-white">Muse</span>
           </div>
 
           <h1 className="text-[20px] font-semibold text-center text-text-primary mb-1">Welcome back</h1>

@@ -63,11 +63,11 @@ export default function Sidebar() {
         className="flex flex-col justify-between p-4 overflow-y-auto select-none"
       >
         <div className="flex flex-col gap-5">
-          {/* 1. App Logo: wavr with small violet circle dot before it */}
+          {/* 1. App Logo: Muse with small violet circle dot before it */}
           <Link to="/" className="flex items-center gap-2 px-2 pt-1 group">
             <span className="w-2.5 h-2.5 rounded-full bg-accent inline-block shadow-sm shadow-accent/50 group-hover:scale-125 transition-transform" />
             <span className="text-[20px] font-bold text-text-primary tracking-tight">
-              wavr
+              Muse
             </span>
           </Link>
 
