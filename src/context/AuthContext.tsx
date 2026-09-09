@@ -1,18 +1,13 @@
-// React Context lets us share data across the whole app
-// without passing it down through every component as props.
-// Here we share the current user and auth functions everywhere.
-
 import { createContext, useContext, useEffect, useState } from 'react'
-import { User } from '@supabase/supabase-js'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import type { Profile } from '../types'
+import { api } from '../services/api'
+import type { Profile, AuthUser } from '../types'
 
 interface AuthContextType {
-  user: User | null              // the raw Supabase auth user
-  profile: Profile | null        // our profiles table row
-  loading: boolean               // true while checking if logged in
+  user: AuthUser | null
+  profile: Profile | null
+  loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: any }>
-  signUp: (email: string, password: string, username: string) => Promise<{ error: any }>
+  signUp: (email: string, password: string, username: string, displayName?: string) => Promise<{ error: any }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
 }
@@ -20,85 +15,114 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchProfile = async (userId: string) => {
-    if (!isSupabaseConfigured) return
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-      if (!error && data) {
-        setProfile(data)
-      }
-    } catch (e) {
-      console.warn('Error fetching profile:', e)
-    }
-  }
-
-  const refreshProfile = async () => {
-    if (user) {
-      await fetchProfile(user.id)
-    }
-  }
-
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
+  const checkAuth = async () => {
+    const token = localStorage.getItem('muse_token')
+    if (!token) {
+      setUser(null)
+      setProfile(null)
       setLoading(false)
       return
     }
 
-    // Check if there's already a logged-in session when app loads
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const currentUser = session?.user ?? null
-      setUser(currentUser)
-      if (currentUser) {
-        fetchProfile(currentUser.id)
+    try {
+      const data = await api.auth.me()
+      if (data && data.user) {
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+        })
+        setProfile({
+          id: data.user.id,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+          bio: data.user.bio,
+          created_at: data.user.created_at,
+        })
       }
+    } catch (err) {
+      console.warn('Session check error:', err)
+      localStorage.removeItem('muse_token')
+      setUser(null)
+      setProfile(null)
+    } finally {
       setLoading(false)
-    }).catch(() => {
-      setLoading(false)
-    })
-
-    // Listen for auth changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const currentUser = session?.user ?? null
-        setUser(currentUser)
-        if (currentUser) {
-          fetchProfile(currentUser.id)
-        } else {
-          setProfile(null)
-        }
-      }
-    )
-
-    // Clean up the listener when this component unmounts
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error }
+    }
   }
 
-  const signUp = async (email: string, password: string, username: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username, display_name: username }  // passed to the handle_new_user trigger
+  useEffect(() => {
+    checkAuth()
+  }, [])
+
+  const refreshProfile = async () => {
+    await checkAuth()
+  }
+
+  const signIn = async (email: string, password: string) => {
+    try {
+      const data = await api.auth.login({ email, password })
+      if (data.token) {
+        localStorage.setItem('muse_token', data.token)
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+        })
+        setProfile({
+          id: data.user.id,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+          bio: data.user.bio,
+          created_at: data.user.created_at,
+        })
+        return { error: null }
       }
-    })
-    return { error }
+      return { error: new Error('Login failed') }
+    } catch (error) {
+      return { error }
+    }
+  }
+
+  const signUp = async (email: string, password: string, username: string, displayName?: string) => {
+    try {
+      const data = await api.auth.register({ email, password, username, displayName })
+      if (data.token) {
+        localStorage.setItem('muse_token', data.token)
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+        })
+        setProfile({
+          id: data.user.id,
+          username: data.user.username,
+          display_name: data.user.display_name,
+          avatar_url: data.user.avatar_url,
+          bio: data.user.bio,
+          created_at: data.user.created_at,
+        })
+        return { error: null }
+      }
+      return { error: new Error('Sign up failed') }
+    } catch (error) {
+      return { error }
+    }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    localStorage.removeItem('muse_token')
     setUser(null)
     setProfile(null)
   }
@@ -110,8 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-// Custom hook — instead of importing AuthContext everywhere,
-// components just call useAuth() to get what they need
 export const useAuth = () => {
   const context = useContext(AuthContext)
   if (!context) throw new Error('useAuth must be used inside AuthProvider')

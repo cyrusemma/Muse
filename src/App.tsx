@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
-import { isSupabaseConfigured } from './lib/supabase'
 import AppShell from './components/layout/AppShell'
 import Home from './pages/Home'
 import Search from './pages/Search'
@@ -11,7 +10,6 @@ import Signup from './pages/auth/Signup'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
-  if (!isSupabaseConfigured) return <>{children}</>
   if (loading) return <div className="p-10 text-text-muted text-[13px]">Loading...</div>
   if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
