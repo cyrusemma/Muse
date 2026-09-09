@@ -27,3 +27,11 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Backend database and runtime uploads
+backend/data/
+backend/uploads/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
